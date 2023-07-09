@@ -4,6 +4,8 @@ use crate::context::Context;
 use crate::serde_utils::{ValueDeserializer, ValueRef};
 use crate::utils;
 use nu_ansi_term::Color;
+use palette::color_difference::EuclideanDistance;
+use palette::{FromColor, Oklab, Srgb};
 use serde::{
     de::value::Error as ValueError, de::Error as SerdeError, Deserialize, Deserializer, Serialize,
 };
@@ -348,6 +350,30 @@ pub fn parse_style_string(
         })
 }
 
+const COLOR_VALUES: [u8; 6] = [0, 95, 135, 175, 215, 255];
+
+fn nearest_256(r: u8, g: u8, b: u8) -> Color {
+    let lab = Oklab::from_color(Srgb::new(r as f32, g as f32, b as f32));
+    let mut best_color = None;
+    let mut best_dist = f32::INFINITY;
+    for (idx_r, r_255) in COLOR_VALUES.iter().enumerate() {
+        for (idx_g, g_255) in COLOR_VALUES.iter().enumerate() {
+            for (idx_b, b_255) in COLOR_VALUES.iter().enumerate() {
+                let lab_256 =
+                    Oklab::from_color(Srgb::new(*r_255 as f32, *g_255 as f32, *b_255 as f32));
+                let d2 = lab_256.distance_squared(lab);
+                if d2 < best_dist {
+                    best_dist = d2;
+                    best_color = Some(Color::Fixed(
+                        (36 * idx_r + 6 * idx_g + idx_b + 16).try_into().unwrap(),
+                    ));
+                }
+            }
+        }
+    }
+    best_color.expect("couldn't find a closer color than inf")
+}
+
 /** Parse a string that represents a color setting, returning None if this fails
  There are three valid color formats:
   - #RRGGBB      (a hash followed by an RGB hex)
@@ -373,7 +399,7 @@ fn parse_color_string(
         let g: u8 = u8::from_str_radix(&color_string[3..5], 16).ok()?;
         let b: u8 = u8::from_str_radix(&color_string[5..7], 16).ok()?;
         log::trace!("Read RGB color string: {},{},{}", r, g, b);
-        return Some(Color::Rgb(r, g, b));
+        return Some(nearest_256(r, g, b));
     }
 
     // Parse a u8 (ansi color)
